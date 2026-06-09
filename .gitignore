@@ -1,0 +1,28 @@
+# macOS
+.DS_Store
+
+# Java / Maven
+backend/target/
+backend/*.db
+backend/*.sqlite
+backend/*.sqlite3
+backend/*.log
+
+# Node / Vite
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Runtime data
+*.db
+*.sqlite
+*.sqlite3
+*.log
