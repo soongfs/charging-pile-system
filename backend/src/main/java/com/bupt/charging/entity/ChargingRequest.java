@@ -16,6 +16,7 @@ public class ChargingRequest {
     private Integer pileId;
     private Integer queueNum;
     private Integer priority;
+    private Long rootRequestId;
     private LocalDateTime updateTime;
     private Long version;
 
@@ -50,6 +51,8 @@ public class ChargingRequest {
     public void setQueueNum(Integer queueNum) { this.queueNum = queueNum; }
     public Integer getPriority() { return priority; }
     public void setPriority(Integer priority) { this.priority = priority; }
+    public Long getRootRequestId() { return rootRequestId; }
+    public void setRootRequestId(Long rootRequestId) { this.rootRequestId = rootRequestId; }
     public LocalDateTime getUpdateTime() { return updateTime; }
     public void setUpdateTime(LocalDateTime updateTime) { this.updateTime = updateTime; }
     public Long getVersion() { return version; }

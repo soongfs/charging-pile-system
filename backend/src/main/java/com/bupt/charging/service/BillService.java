@@ -35,6 +35,13 @@ public class BillService {
         if (bill == null) {
             return null;
         }
+        // 账单按请求组(root_request_id)聚合, 一张账单可对应多条详单(故障迁移续充)。
+        if (bill.getRootRequestId() != null) {
+            List<ChargingRecord> records = recordMapper.findByRootRequestId(bill.getRootRequestId());
+            if (!records.isEmpty()) {
+                return new BillDetailResponse(bill, records);
+            }
+        }
         if (bill.getRecordId() != null) {
             ChargingRecord record = recordMapper.findById(bill.getRecordId());
             return new BillDetailResponse(bill, record == null ? List.of() : List.of(record));

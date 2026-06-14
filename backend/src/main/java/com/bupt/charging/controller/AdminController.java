@@ -4,6 +4,7 @@ import com.bupt.charging.entity.ChargingPile;
 import com.bupt.charging.dto.PileCommandRequest;
 import com.bupt.charging.dto.PricingUpdateRequest;
 import com.bupt.charging.service.AdminMonitorService;
+import com.bupt.charging.service.ChargingService;
 import com.bupt.charging.service.PileService;
 import com.bupt.charging.service.PricingService;
 import org.springframework.web.bind.annotation.*;
@@ -16,19 +17,34 @@ public class AdminController {
     private final PileService pileService;
     private final PricingService pricingService;
     private final AdminMonitorService monitorService;
+    private final ChargingService chargingService;
 
     public AdminController(PileService pileService,
                            PricingService pricingService,
-                           AdminMonitorService monitorService) {
+                           AdminMonitorService monitorService,
+                           ChargingService chargingService) {
         this.pileService = pileService;
         this.pricingService = pricingService;
         this.monitorService = monitorService;
+        this.chargingService = chargingService;
     }
 
     @PostMapping("/pile/power-on")
     public Map<String, Object> powerOn(@RequestBody PileCommandRequest body) {
         int result = pileService.powerOn(body.pileId());
         return ApiResponse.fromResult(result, "充电桩不存在或已经开机");
+    }
+
+    @PostMapping("/pile/fault")
+    public Map<String, Object> fault(@RequestBody PileCommandRequest body) {
+        int result = chargingService.faultPile(body.pileId());
+        return ApiResponse.fromResult(result, "充电桩不存在");
+    }
+
+    @PostMapping("/pile/recover")
+    public Map<String, Object> recover(@RequestBody PileCommandRequest body) {
+        int result = pileService.recoverPile(body.pileId());
+        return ApiResponse.fromResult(result, "充电桩不存在或未处于故障状态");
     }
 
     @PutMapping("/pricing")

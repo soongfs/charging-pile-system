@@ -47,28 +47,44 @@ class FaultPriorityDispatchTest {
         return r;
     }
 
+    private void insertDispatchedOnPile(String carId, ChargingMode mode, int amount,
+                                        LocalDateTime time, int pileId) {
+        ChargingRequest r = new ChargingRequest(carId, BigDecimal.valueOf(amount), mode);
+        r.setRequestTime(time);
+        r.setUpdateTime(time);
+        r.setCarState(RequestState.DISPATCHED);
+        r.setQueueNum(0);
+        r.setPriority(0);
+        r.setPileId(pileId);
+        requestMapper.insert(r);
+    }
+
     @Test
     void faultPriorityCarOutranksEarlierNormalWaitingCar() {
-        // 使用 data.sql 预置的快充桩 1, 确保其空闲可分配
+        // 快充桩 1 可用, 桩 2 关机 -> 快充只有桩 1 一个可分配桩(容量 M=3)。
         pileMapper.updatePowerAndWorkingState(1, PilePowerState.ON, PileWorkingState.RUNNING);
+        pileMapper.updatePowerAndWorkingState(2, PilePowerState.OFF, PileWorkingState.OFF);
 
         LocalDateTime base = LocalDateTime.of(2026, 1, 1, 6, 0);
-        // 普通等候区车: 到达更早(06:00), priority=0
+        // 预先占用桩 1 的 2 个槽位(已分配), 使桩 1 仅剩最后 1 个槽位。
+        insertDispatchedOnPile("fill-1-" + System.nanoTime(), ChargingMode.FAST, 30, base, 1);
+        insertDispatchedOnPile("fill-2-" + System.nanoTime(), ChargingMode.FAST, 30, base.plusSeconds(1), 1);
+
+        // 普通等候区车: 到达较早(06:10), priority=0
         String earlyCar = "fault-early-" + System.nanoTime();
-        insertWaiting(earlyCar, ChargingMode.FAST, 30, base, 0);
+        insertWaiting(earlyCar, ChargingMode.FAST, 30, base.plusMinutes(10), 0);
         // 故障再调度车: 到达更晚(06:30), priority=1 (模拟刚从故障桩释放)
         String faultCar = "fault-prio-" + System.nanoTime();
         insertWaiting(faultCar, ChargingMode.FAST, 30, base.plusMinutes(30), 1);
 
-        // 调度一次: 应选中故障车(priority 高), 而非到达更早的普通车
-        ChargingRequest dispatched = queueService.dispatchNext(ChargingMode.FAST);
+        // 仅剩 1 个槽位: 调度必须给故障车(priority 高), 冻结更早到达的普通车。
+        queueService.dispatchNext(ChargingMode.FAST);
 
-        assertThat(dispatched).isNotNull();
-        assertThat(dispatched.getCarId()).isEqualTo(faultCar);
-        assertThat(dispatched.getCarState()).isEqualTo(RequestState.DISPATCHED);
-
-        // 普通早到车仍在等候(被冻结)
-        ChargingRequest stillWaiting = requestMapper.findActiveByCarId(earlyCar);
-        assertThat(stillWaiting.getCarState()).isEqualTo(RequestState.WAITING);
+        ChargingRequest faultState = requestMapper.findActiveByCarId(faultCar);
+        ChargingRequest earlyState = requestMapper.findActiveByCarId(earlyCar);
+        assertThat(faultState.getCarState()).isEqualTo(RequestState.DISPATCHED);
+        assertThat(faultState.getPileId()).isEqualTo(1);
+        // 普通早到车被冻结, 仍在等候区
+        assertThat(earlyState.getCarState()).isEqualTo(RequestState.WAITING);
     }
 }

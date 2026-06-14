@@ -37,6 +37,6 @@ public interface ChargingPileMapper {
                             @Param("amount") BigDecimal amount);
 
     @Select("SELECT * FROM charging_pile WHERE type = #{type} AND power_state = 'on' " +
-            "AND working_state IN ('idle', 'running') ORDER BY id ASC")
+            "AND working_state IN ('idle', 'running', 'charging') ORDER BY id ASC")
     List<ChargingPile> findAvailablePiles(@Param("type") String type);
 }

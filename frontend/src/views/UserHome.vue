@@ -513,6 +513,7 @@ onBeforeUnmount(() => {
                       <span class="status-pill status-idle">{{ fmtNumber(bill.chargeAmount, 3) }} kWh</span>
                       <span class="status-pill status-running">{{ fmtSeconds(bill.chargeDuration) }}</span>
                       <span class="status-pill status-dispatched amount">{{ fmtMoney(bill.totalFee) }}</span>
+                      <span v-if="bill.detailCount > 1" class="status-pill status-fault">{{ bill.detailCount }} 详单</span>
                     </div>
                   </div>
                   <div class="pile-actions">

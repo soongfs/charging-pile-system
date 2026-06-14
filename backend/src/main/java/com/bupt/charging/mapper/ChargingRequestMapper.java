@@ -8,8 +8,8 @@ import java.util.List;
 
 @Mapper
 public interface ChargingRequestMapper {
-    @Insert("INSERT INTO charging_request(car_id, request_amount, request_mode, request_time, car_state, pile_id, queue_num, priority, update_time, version) " +
-            "VALUES(#{carId}, #{requestAmount}, #{requestMode}, #{requestTime}, #{carState}, #{pileId}, #{queueNum}, COALESCE(#{priority}, 0), #{updateTime}, #{version})")
+    @Insert("INSERT INTO charging_request(car_id, request_amount, request_mode, request_time, car_state, pile_id, queue_num, priority, root_request_id, update_time, version) " +
+            "VALUES(#{carId}, #{requestAmount}, #{requestMode}, #{requestTime}, #{carState}, #{pileId}, #{queueNum}, COALESCE(#{priority}, 0), #{rootRequestId}, #{updateTime}, #{version})")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(ChargingRequest request);
 
@@ -18,6 +18,9 @@ public interface ChargingRequestMapper {
 
     @Select("SELECT * FROM charging_request WHERE id = #{id}")
     ChargingRequest findById(@Param("id") Long id);
+
+    @Update("UPDATE charging_request SET root_request_id = #{rootRequestId} WHERE id = #{id}")
+    int setRootRequestId(@Param("id") Long id, @Param("rootRequestId") Long rootRequestId);
 
     @Select("SELECT * FROM charging_request WHERE car_id = #{carId} AND car_state != 'done' AND car_state != 'cancelled' ORDER BY id DESC LIMIT 1")
     ChargingRequest findActiveByCarId(@Param("carId") String carId);

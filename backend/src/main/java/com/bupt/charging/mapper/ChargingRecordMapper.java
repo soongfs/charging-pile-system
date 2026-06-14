@@ -15,6 +15,9 @@ public interface ChargingRecordMapper {
     @Select("SELECT * FROM charging_record WHERE car_id = #{carId} AND end_time IS NULL ORDER BY id DESC LIMIT 1")
     ChargingRecord findActiveByCarId(@Param("carId") String carId);
 
+    @Select("SELECT * FROM charging_record WHERE end_time IS NULL ORDER BY id ASC")
+    List<ChargingRecord> findAllActive();
+
     @Select("SELECT * FROM charging_record WHERE pile_id = #{pileId} AND end_time IS NULL ORDER BY id DESC LIMIT 1")
     ChargingRecord findActiveByPileId(@Param("pileId") Integer pileId);
 
@@ -36,6 +39,11 @@ public interface ChargingRecordMapper {
 
     @Select("SELECT * FROM charging_record WHERE request_id = #{requestId} ORDER BY id ASC")
     List<ChargingRecord> findByRequestId(@Param("requestId") Long requestId);
+
+    @Select("SELECT cr.* FROM charging_record cr " +
+            "JOIN charging_request rq ON cr.request_id = rq.id " +
+            "WHERE rq.root_request_id = #{rootRequestId} ORDER BY cr.id ASC")
+    List<ChargingRecord> findByRootRequestId(@Param("rootRequestId") Long rootRequestId);
 
     @Select("SELECT * FROM charging_record WHERE car_id = #{carId}")
     List<ChargingRecord> findByCarId(@Param("carId") String carId);

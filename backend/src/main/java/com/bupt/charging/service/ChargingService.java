@@ -16,6 +16,7 @@ import com.bupt.charging.enums.UserState;
 import com.bupt.charging.mapper.ChargingRecordMapper;
 import com.bupt.charging.mapper.ChargingRequestMapper;
 import com.bupt.charging.mapper.UserMapper;
+import com.bupt.charging.time.TimeProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,6 +34,7 @@ public class ChargingService {
     private final BillingService billingService;
     private final PileService pileService;
     private final ChargingStateMachine stateMachine;
+    private final TimeProvider timeProvider;
 
     public ChargingService(ChargingRequestMapper requestMapper,
                            ChargingRecordMapper recordMapper,
@@ -40,7 +42,8 @@ public class ChargingService {
                            QueueService queueService,
                            BillingService billingService,
                            PileService pileService,
-                           ChargingStateMachine stateMachine) {
+                           ChargingStateMachine stateMachine,
+                           TimeProvider timeProvider) {
         this.requestMapper = requestMapper;
         this.recordMapper = recordMapper;
         this.userMapper = userMapper;
@@ -48,6 +51,7 @@ public class ChargingService {
         this.billingService = billingService;
         this.pileService = pileService;
         this.stateMachine = stateMachine;
+        this.timeProvider = timeProvider;
     }
 
     /**
@@ -71,9 +75,15 @@ public class ChargingService {
         }
 
         ChargingRequest request = new ChargingRequest(carId, input.requestAmount(), mode);
+        LocalDateTime requestTime = timeProvider.now();
+        request.setRequestTime(requestTime);
+        request.setUpdateTime(requestTime);
         requestMapper.insert(request);
+        // 正常请求的请求组根 = 自身, 用于账单按"充电请求生命周期"聚合。
+        request.setRootRequestId(request.getId());
+        requestMapper.setRootRequestId(request.getId(), request.getId());
         queueService.enqueue(request);
-        request.setUpdateTime(LocalDateTime.now());
+        request.setUpdateTime(timeProvider.now());
         requestMapper.update(request);
 
         ChargingRequest dispatched = queueService.dispatchNext(mode);
@@ -103,7 +113,7 @@ public class ChargingService {
         if (user == null || input.amount().compareTo(user.getCarCapacity()) > 0) return 1;
 
         request.setRequestAmount(input.amount());
-        request.setUpdateTime(LocalDateTime.now());
+        request.setUpdateTime(timeProvider.now());
         int rows = requestMapper.update(request);
         return rows > 0 ? 0 : 1;
     }
@@ -127,7 +137,7 @@ public class ChargingService {
         request.setRequestMode(newMode);
         request.setPileId(null);
         queueService.enqueue(request);
-        request.setUpdateTime(LocalDateTime.now());
+        request.setUpdateTime(timeProvider.now());
         int rows = requestMapper.update(request);
         queueService.refreshQueueNumbers(oldMode);
         queueService.refreshQueueNumbers(newMode);
@@ -158,9 +168,9 @@ public class ChargingService {
         if (request.isCharging() || recordMapper.findActiveByCarId(command.carId().trim()) != null) return 1;
 
         if (request.isWaiting()) {
-            ChargingRequest dispatched = queueService.dispatchNext(request.getRequestMode());
-            if (dispatched == null || !Objects.equals(dispatched.getId(), request.getId())) return 1;
-            request = dispatched;
+            queueService.dispatchNext(request.getRequestMode());
+            request = requestMapper.findActiveByCarId(command.carId().trim());
+            if (request == null) return 1;
         }
 
         if (!request.isDispatched()) return 1;
@@ -171,6 +181,7 @@ public class ChargingService {
         if (recordMapper.findActiveByPileId(assignedPileId) != null) return 1;
 
         ChargingRecord record = new ChargingRecord(command.carId().trim(), request.getId(), assignedPileId);
+        record.setStartTime(timeProvider.now());
         recordMapper.insert(record);
 
         pileService.updateWorkingState(assignedPileId, PileWorkingState.CHARGING);
@@ -178,7 +189,7 @@ public class ChargingService {
         stateMachine.applyRequestState(request, RequestState.CHARGING);
         request.setPileId(assignedPileId);
         request.setQueueNum(0);
-        request.setUpdateTime(LocalDateTime.now());
+        request.setUpdateTime(timeProvider.now());
         requestMapper.update(request);
 
         return 0;
@@ -223,7 +234,20 @@ public class ChargingService {
         if (record == null) return 1;
         if (command.pileId() != null && !Objects.equals(record.getPileId(), command.pileId())) return 1;
 
-        LocalDateTime endTime = LocalDateTime.now();
+        LocalDateTime endTime = timeProvider.now();
+        completeCharging(record, endTime);
+        return 0;
+    }
+
+    /**
+     * 结算一条充电记录并离桩：计算计费、写回记录、生成账单、释放充电桩、
+     * 将申请置为完成态并触发再调度。
+     *
+     * <p>由用户主动结束充电（{@link #endCharging}）和系统检测到充满后自动离桩
+     * （ChargingMonitorService）共同调用，保证两条路径结算逻辑一致。</p>
+     */
+    @Transactional
+    public void completeCharging(ChargingRecord record, LocalDateTime endTime) {
         BillingService.ChargingMetrics metrics = billingService.calculateMetrics(record, endTime);
 
         record.setEndTime(endTime);
@@ -239,11 +263,55 @@ public class ChargingService {
         if (request != null) {
             stateMachine.applyRequestState(request, RequestState.DONE);
             request.setQueueNum(0);
-            request.setUpdateTime(LocalDateTime.now());
+            request.setUpdateTime(timeProvider.now());
             requestMapper.update(request);
             queueService.dispatchNext(request.getRequestMode());
         }
+    }
 
+    /**
+     * UC: 充电桩故障。强制将桩置为 FAULT(无论是否在充电), 并按"故障优先 + 等候区冻结"
+     * 重调度该桩上的所有车辆。
+     *
+     * <p>方案甲(与中途结束计费一致): 正在充电的车头先按已充电量结算出账单, 其未充够的
+     * 剩余需求作为一条新的高优先级(priority=1)申请重新入队, 去同类型其他桩续充; 桩内
+     * 尚未开始充电的排队车(dispatched)整体以 priority=1 重新入队。随后触发再调度,
+     * 故障车绝对优先于普通等候区(冻结), 直至全部进入充电区。</p>
+     *
+     * @return 0 成功; 1 桩不存在
+     */
+    @Transactional
+    public int faultPile(Integer pileId) {
+        if (pileId == null) return 1;
+
+        // 1) 正在充电的车头: 按已充电量结算(出账单), 剩余需求转为新的高优先级申请。
+        ChargingRecord head = recordMapper.findActiveByPileId(pileId);
+        if (head != null) {
+            ChargingRequest origin = requestMapper.findById(head.getRequestId());
+            LocalDateTime now = timeProvider.now();
+            BillingService.ChargingMetrics metrics = billingService.calculateMetrics(head, now);
+            completeCharging(head, now);   // 结算已充部分并置原申请为 DONE
+
+            if (origin != null) {
+                BigDecimal remaining = origin.getRequestAmount().subtract(metrics.chargedAmount());
+                if (remaining.compareTo(BigDecimal.ZERO) > 0) {
+                    ChargingRequest cont = new ChargingRequest(origin.getCarId(), remaining, origin.getRequestMode());
+                    LocalDateTime t = timeProvider.now();
+                    cont.setRequestTime(origin.getRequestTime());   // 保留原到达时刻, 保证再调度顺序
+                    cont.setUpdateTime(t);
+                    cont.setPriority(1);                            // 故障优先队列
+                    // 续充申请继承原请求组根, 使两段详单归并到同一张账单(一次账单≥2详单)。
+                    Long root = origin.getRootRequestId() != null ? origin.getRootRequestId() : origin.getId();
+                    cont.setRootRequestId(root);
+                    requestMapper.insert(cont);
+                    requestMapper.setRootRequestId(cont.getId(), root);
+                }
+            }
+        }
+
+        // 2) 桩内尚未开始充电的排队车: 整体以 priority=1 重新入队(releaseDispatchedForPile 已实现)。
+        //    3) 标记桩 FAULT 并触发再调度也在其内完成。
+        pileService.faultPile(pileId);
         return 0;
     }
 

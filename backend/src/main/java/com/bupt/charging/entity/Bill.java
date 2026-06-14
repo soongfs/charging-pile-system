@@ -7,6 +7,7 @@ public class Bill {
     private Long id;
     private Long recordId;
     private Long requestId;
+    private Long rootRequestId;
     private String carId;
     private LocalDate date;
     private Integer pileId;
@@ -15,6 +16,7 @@ public class Bill {
     private BigDecimal totalChargeFee;
     private BigDecimal totalServiceFee;
     private BigDecimal totalFee;
+    private int detailCount = 1;
 
     public Bill() {}
 
@@ -24,6 +26,8 @@ public class Bill {
     public void setRecordId(Long recordId) { this.recordId = recordId; }
     public Long getRequestId() { return requestId; }
     public void setRequestId(Long requestId) { this.requestId = requestId; }
+    public Long getRootRequestId() { return rootRequestId; }
+    public void setRootRequestId(Long rootRequestId) { this.rootRequestId = rootRequestId; }
     public String getCarId() { return carId; }
     public void setCarId(String carId) { this.carId = carId; }
     public LocalDate getDate() { return date; }
@@ -40,4 +44,6 @@ public class Bill {
     public void setTotalServiceFee(BigDecimal totalServiceFee) { this.totalServiceFee = totalServiceFee; }
     public BigDecimal getTotalFee() { return totalFee; }
     public void setTotalFee(BigDecimal totalFee) { this.totalFee = totalFee; }
+    public int getDetailCount() { return detailCount; }
+    public void setDetailCount(int detailCount) { this.detailCount = detailCount; }
 }

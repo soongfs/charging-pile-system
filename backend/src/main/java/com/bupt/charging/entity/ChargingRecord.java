@@ -20,7 +20,6 @@ public class ChargingRecord {
         this.carId = carId;
         this.requestId = requestId;
         this.pileId = pileId;
-        this.startTime = LocalDateTime.now();
         this.chargeAmount = BigDecimal.ZERO;
         this.chargeFee = BigDecimal.ZERO;
         this.serviceFee = BigDecimal.ZERO;

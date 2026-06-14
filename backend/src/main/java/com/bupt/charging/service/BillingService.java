@@ -3,6 +3,7 @@ package com.bupt.charging.service;
 import com.bupt.charging.entity.*;
 import com.bupt.charging.mapper.BillMapper;
 import com.bupt.charging.mapper.ChargingRequestMapper;
+import com.bupt.charging.time.TimeProvider;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -17,22 +18,25 @@ public class BillingService {
     private final BillMapper billMapper;
     private final ChargingRequestMapper requestMapper;
     private final PileService pileService;
+    private final TimeProvider timeProvider;
 
     public BillingService(PricingService pricingService, BillMapper billMapper,
-                          ChargingRequestMapper requestMapper, PileService pileService) {
+                          ChargingRequestMapper requestMapper, PileService pileService,
+                          TimeProvider timeProvider) {
         this.pricingService = pricingService;
         this.billMapper = billMapper;
         this.requestMapper = requestMapper;
         this.pileService = pileService;
+        this.timeProvider = timeProvider;
     }
 
     public BigDecimal[] calculateFee(ChargingRecord record) {
-        ChargingMetrics metrics = calculateMetrics(record, LocalDateTime.now());
+        ChargingMetrics metrics = calculateMetrics(record, timeProvider.now());
         return new BigDecimal[]{metrics.chargeFee(), metrics.serviceFee()};
     }
 
     public ChargingMetrics calculateMetrics(ChargingRecord record) {
-        return calculateMetrics(record, LocalDateTime.now());
+        return calculateMetrics(record, timeProvider.now());
     }
 
     public ChargingMetrics calculateMetrics(ChargingRecord record, LocalDateTime endTime) {
@@ -70,27 +74,55 @@ public class BillingService {
     }
 
     /**
-     * Generate bill after charging ends.
+     * 生成/累加账单(按"充电请求生命周期"聚合)。
+     *
+     * <p>详细需求"一次账单对应至少 2 个详单": 每段充电过程(ChargingRecord)是一条详单,
+     * 同一请求组(root_request_id 相同, 含故障迁移续充)归并为一张账单。首段创建账单,
+     * 后续段累加电量/时长/费用并 detail_count+1。</p>
      */
     public Bill generateBill(ChargingRecord record) {
-        Bill bill = new Bill();
-        bill.setRecordId(record.getId());
-        bill.setRequestId(record.getRequestId());
-        bill.setCarId(record.getCarId());
-        bill.setDate(record.getEndTime() == null ? LocalDateTime.now().toLocalDate() : record.getEndTime().toLocalDate());
-        bill.setPileId(record.getPileId());
-        bill.setChargeAmount(record.getChargeAmount());
-        bill.setTotalChargeFee(record.getChargeFee());
-        bill.setTotalServiceFee(record.getServiceFee());
-        bill.setTotalFee(record.getChargeFee().add(record.getServiceFee()));
+        // 解析该详单所属的请求组根。
+        ChargingRequest req = requestMapper.findById(record.getRequestId());
+        Long rootId = (req != null && req.getRootRequestId() != null)
+                ? req.getRootRequestId()
+                : record.getRequestId();
 
-        // Duration
         LocalDateTime start = record.getStartTime();
         LocalDateTime end = record.getEndTime();
-        bill.setChargeDuration((int) ChronoUnit.SECONDS.between(start, end));
+        int durationSec = (int) ChronoUnit.SECONDS.between(start, end);
+        BigDecimal segFee = record.getChargeFee();
+        BigDecimal segSvc = record.getServiceFee();
 
-        billMapper.insert(bill);
-        return bill;
+        Bill existing = billMapper.findByRootRequestId(rootId);
+        if (existing == null) {
+            // 首段: 新建账单。
+            Bill bill = new Bill();
+            bill.setRecordId(record.getId());
+            bill.setRequestId(record.getRequestId());
+            bill.setRootRequestId(rootId);
+            bill.setCarId(record.getCarId());
+            bill.setDate(end == null ? timeProvider.now().toLocalDate() : end.toLocalDate());
+            bill.setPileId(record.getPileId());
+            bill.setChargeAmount(record.getChargeAmount());
+            bill.setTotalChargeFee(segFee);
+            bill.setTotalServiceFee(segSvc);
+            bill.setTotalFee(segFee.add(segSvc));
+            bill.setChargeDuration(durationSec);
+            bill.setDetailCount(1);
+            billMapper.insert(bill);
+            return bill;
+        }
+
+        // 后续段(故障续充): 累加到同一张账单。
+        existing.setChargeAmount(existing.getChargeAmount().add(record.getChargeAmount()));
+        existing.setTotalChargeFee(existing.getTotalChargeFee().add(segFee));
+        existing.setTotalServiceFee(existing.getTotalServiceFee().add(segSvc));
+        existing.setTotalFee(existing.getTotalChargeFee().add(existing.getTotalServiceFee()));
+        existing.setChargeDuration(existing.getChargeDuration() + durationSec);
+        existing.setDetailCount(existing.getDetailCount() + 1);
+        existing.setPileId(record.getPileId());   // 反映最后充电的桩
+        billMapper.update(existing);
+        return existing;
     }
 
     private BigDecimal calculateEnergyFee(PricingConfig config, LocalDateTime start,
