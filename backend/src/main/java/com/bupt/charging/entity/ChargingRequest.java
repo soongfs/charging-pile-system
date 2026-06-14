@@ -15,6 +15,7 @@ public class ChargingRequest {
     private RequestState carState;
     private Integer pileId;
     private Integer queueNum;
+    private Integer priority;
     private LocalDateTime updateTime;
     private Long version;
 
@@ -27,6 +28,7 @@ public class ChargingRequest {
         this.requestTime = LocalDateTime.now();
         this.updateTime = this.requestTime;
         this.carState = RequestState.WAITING;
+        this.priority = 0;
         this.version = 0L;
     }
 
@@ -46,6 +48,8 @@ public class ChargingRequest {
     public void setPileId(Integer pileId) { this.pileId = pileId; }
     public Integer getQueueNum() { return queueNum; }
     public void setQueueNum(Integer queueNum) { this.queueNum = queueNum; }
+    public Integer getPriority() { return priority; }
+    public void setPriority(Integer priority) { this.priority = priority; }
     public LocalDateTime getUpdateTime() { return updateTime; }
     public void setUpdateTime(LocalDateTime updateTime) { this.updateTime = updateTime; }
     public Long getVersion() { return version; }

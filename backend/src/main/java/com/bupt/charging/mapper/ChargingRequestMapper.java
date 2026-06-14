@@ -8,8 +8,8 @@ import java.util.List;
 
 @Mapper
 public interface ChargingRequestMapper {
-    @Insert("INSERT INTO charging_request(car_id, request_amount, request_mode, request_time, car_state, pile_id, queue_num, update_time, version) " +
-            "VALUES(#{carId}, #{requestAmount}, #{requestMode}, #{requestTime}, #{carState}, #{pileId}, #{queueNum}, #{updateTime}, #{version})")
+    @Insert("INSERT INTO charging_request(car_id, request_amount, request_mode, request_time, car_state, pile_id, queue_num, priority, update_time, version) " +
+            "VALUES(#{carId}, #{requestAmount}, #{requestMode}, #{requestTime}, #{carState}, #{pileId}, #{queueNum}, COALESCE(#{priority}, 0), #{updateTime}, #{version})")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(ChargingRequest request);
 
@@ -23,14 +23,14 @@ public interface ChargingRequestMapper {
     ChargingRequest findActiveByCarId(@Param("carId") String carId);
 
     @Update("UPDATE charging_request SET request_amount = #{requestAmount}, request_mode = #{requestMode}, " +
-            "car_state = #{carState}, pile_id = #{pileId}, queue_num = #{queueNum}, " +
+            "car_state = #{carState}, pile_id = #{pileId}, queue_num = #{queueNum}, priority = COALESCE(#{priority}, 0), " +
             "update_time = strftime('%Y-%m-%dT%H:%M:%f','now'), version = COALESCE(version, 0) + 1 WHERE id = #{id}")
     int update(ChargingRequest request);
 
-    @Select("SELECT * FROM charging_request WHERE request_mode = #{mode} AND car_state IN ('waiting', 'dispatched') ORDER BY request_time ASC")
+    @Select("SELECT * FROM charging_request WHERE request_mode = #{mode} AND car_state IN ('waiting', 'dispatched') ORDER BY priority DESC, request_time ASC")
     List<ChargingRequest> findByQueueType(@Param("mode") ChargingMode mode);
 
-    @Select("SELECT * FROM charging_request WHERE car_state = 'waiting' AND request_mode = #{mode} ORDER BY request_time ASC")
+    @Select("SELECT * FROM charging_request WHERE car_state = 'waiting' AND request_mode = #{mode} ORDER BY priority DESC, request_time ASC")
     List<ChargingRequest> findWaitingByMode(@Param("mode") ChargingMode mode);
 
     @Select("SELECT * FROM charging_request WHERE pile_id = #{pileId} AND car_state IN ('dispatched', 'charging') ORDER BY request_time ASC")

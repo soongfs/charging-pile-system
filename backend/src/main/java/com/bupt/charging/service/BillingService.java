@@ -119,29 +119,30 @@ public class BillingService {
     }
 
     private BigDecimal getPricePerKwh(PricingConfig config, LocalTime time) {
-        if (!time.isBefore(LocalTime.of(8, 0)) && time.isBefore(LocalTime.of(11, 0))) {
+        // 平时: 7:00-10:00, 15:00-18:00, 21:00-23:00
+        if ((!time.isBefore(LocalTime.of(7, 0)) && time.isBefore(LocalTime.of(10, 0)))
+                || (!time.isBefore(LocalTime.of(15, 0)) && time.isBefore(LocalTime.of(18, 0)))
+                || (!time.isBefore(LocalTime.of(21, 0)) && time.isBefore(LocalTime.of(23, 0)))) {
             return config.getNormalPrice();
         }
-        if (!time.isBefore(LocalTime.of(11, 0)) && time.isBefore(LocalTime.of(15, 0))) {
+        // 峰时: 10:00-15:00, 18:00-21:00
+        if ((!time.isBefore(LocalTime.of(10, 0)) && time.isBefore(LocalTime.of(15, 0)))
+                || (!time.isBefore(LocalTime.of(18, 0)) && time.isBefore(LocalTime.of(21, 0)))) {
             return config.getPeakPrice();
         }
-        if (!time.isBefore(LocalTime.of(15, 0)) && time.isBefore(LocalTime.of(18, 0))) {
-            return config.getNormalPrice();
-        }
-        if (!time.isBefore(LocalTime.of(18, 0)) && time.isBefore(LocalTime.of(22, 0))) {
-            return config.getPeakPrice();
-        }
+        // 谷时: 23:00-次日7:00
         return config.getValleyPrice();
     }
 
     private LocalDateTime nextPriceBoundary(LocalDateTime time) {
         LocalTime current = time.toLocalTime();
         LocalTime[] boundaries = {
-                LocalTime.of(8, 0),
-                LocalTime.of(11, 0),
+                LocalTime.of(7, 0),
+                LocalTime.of(10, 0),
                 LocalTime.of(15, 0),
                 LocalTime.of(18, 0),
-                LocalTime.of(22, 0)
+                LocalTime.of(21, 0),
+                LocalTime.of(23, 0)
         };
 
         for (LocalTime boundary : boundaries) {

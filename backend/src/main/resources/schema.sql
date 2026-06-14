@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS charging_request (
     car_state TEXT NOT NULL,
     pile_id INTEGER,
     queue_num INTEGER,
+    priority INTEGER NOT NULL DEFAULT 0,
     update_time TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f','now')),
     version INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (car_id) REFERENCES user(car_id)
@@ -74,7 +75,7 @@ CREATE TABLE IF NOT EXISTS pricing_config (
 );
 
 CREATE INDEX IF NOT EXISTS idx_charging_request_car_state ON charging_request(car_id, car_state);
-CREATE INDEX IF NOT EXISTS idx_charging_request_queue ON charging_request(request_mode, car_state, request_time);
+CREATE INDEX IF NOT EXISTS idx_charging_request_queue ON charging_request(request_mode, car_state, priority, request_time);
 CREATE INDEX IF NOT EXISTS idx_charging_record_car ON charging_record(car_id, request_id);
 CREATE INDEX IF NOT EXISTS idx_bill_car_date ON bill(car_id, date);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_charging_record_active_car ON charging_record(car_id) WHERE end_time IS NULL;

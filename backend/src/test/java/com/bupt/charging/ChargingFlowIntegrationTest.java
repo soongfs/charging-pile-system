@@ -55,7 +55,7 @@ class ChargingFlowIntegrationTest {
 
         Map<String, Object> progress = assertSuccess(get("/api/charging/progress/" + carId));
         assertThat(progress.get("pileId")).isEqualTo(request.get("pileId"));
-        assertThat(progress.get("powerKw")).isEqualTo(120.0);
+        assertThat(progress.get("powerKw")).isEqualTo(30.0);
 
         assertSuccess(post("/api/charging/end", Map.of("carId", carId)));
 

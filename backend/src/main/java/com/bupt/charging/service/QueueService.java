@@ -7,7 +7,8 @@ import com.bupt.charging.enums.RequestState;
 import com.bupt.charging.mapper.ChargingPileMapper;
 import com.bupt.charging.mapper.ChargingRecordMapper;
 import com.bupt.charging.mapper.ChargingRequestMapper;
-import com.bupt.charging.service.scheduling.TimeOrderSchedulingStrategy;
+import com.bupt.charging.service.scheduling.SchedulingStrategy;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -18,12 +19,12 @@ public class QueueService {
     private final ChargingRequestMapper requestMapper;
     private final ChargingPileMapper pileMapper;
     private final ChargingRecordMapper recordMapper;
-    private final TimeOrderSchedulingStrategy schedulingStrategy;
+    private final SchedulingStrategy schedulingStrategy;
 
     public QueueService(ChargingRequestMapper requestMapper,
                         ChargingPileMapper pileMapper,
                         ChargingRecordMapper recordMapper,
-                        TimeOrderSchedulingStrategy schedulingStrategy) {
+                        @Qualifier("timeOrderSchedulingStrategy") SchedulingStrategy schedulingStrategy) {
         this.requestMapper = requestMapper;
         this.pileMapper = pileMapper;
         this.recordMapper = recordMapper;
@@ -91,7 +92,21 @@ public class QueueService {
         List<ChargingRequest> waiting = requestMapper.findWaitingByMode(mode);
         if (waiting.isEmpty()) return null;
 
-        ChargingRequest next = schedulingStrategy.selectNextCar(waiting);
+        // 故障再调度的车带 priority>0, 绝对优先于普通等候区(等候区冻结)。
+        // 只在当前最高优先级分组内, 再交由调度策略按其规则选车。
+        int topPriority = waiting.stream()
+                .map(r -> r.getPriority() == null ? 0 : r.getPriority())
+                .max(Integer::compareTo)
+                .orElse(0);
+        List<ChargingRequest> candidates = new ArrayList<>();
+        for (ChargingRequest r : waiting) {
+            int p = r.getPriority() == null ? 0 : r.getPriority();
+            if (p == topPriority) {
+                candidates.add(r);
+            }
+        }
+
+        ChargingRequest next = schedulingStrategy.selectNextCar(candidates);
         if (next == null) return null;
 
         ChargingPile bestPile = schedulingStrategy.selectPile(next, freePiles);
@@ -107,6 +122,13 @@ public class QueueService {
         return next;
     }
 
+    /**
+     * 充电桩故障/关闭时, 释放该桩上已分配但尚未完成的车辆并执行再调度。
+     *
+     * <p>按验收规则, 故障桩上的车进入"故障优先队列": 给予 priority=1, 使其在 dispatchNext
+     * 中绝对优先于普通等候区车辆(普通等候区被冻结), 直至故障车全部进入充电区后, 才恢复
+     * 对普通等候区的调度。再调度仅在同类型充电桩内进行, 不跨快慢充类型。</p>
+     */
     public void releaseDispatchedForPile(Integer pileId) {
         List<ChargingRequest> assigned = requestMapper.findDispatchedByPileId(pileId);
         Set<ChargingMode> affectedModes = EnumSet.noneOf(ChargingMode.class);
@@ -114,6 +136,7 @@ public class QueueService {
             affectedModes.add(request.getRequestMode());
             request.setPileId(null);
             request.setCarState(RequestState.WAITING);
+            request.setPriority(1);   // 故障优先队列: 冻结普通等候区
             enqueue(request);
             requestMapper.update(request);
         }
