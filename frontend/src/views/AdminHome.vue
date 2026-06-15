@@ -98,6 +98,20 @@ const totalTimes = computed(() => piles.value.reduce((sum, pile) => sum + Number
 const activePileCount = computed(() => piles.value.filter((pile) => pile.powerState === 'on').length)
 const queueCount = computed(() => fastQueue.value.length + slowQueue.value.length)
 
+// 每个桩当前「已分配未充电」(dispatched) 的车数。
+// queue/state 返回 waiting + dispatched 的车，dispatched 的带 pileId。
+// 桩自身 workingState 只有车真正 start 后才变 charging，dispatched 阶段桩仍显示空闲，
+// 这里把分配关系补到桩卡片上，避免「桩有车分配但显示空闲」的口径困惑。
+const dispatchedByPile = computed(() => {
+  const map = {}
+  for (const row of [...fastQueue.value, ...slowQueue.value]) {
+    if (String(row.carState).toLowerCase() === 'dispatched' && row.pileId != null) {
+      map[row.pileId] = (map[row.pileId] || 0) + 1
+    }
+  }
+  return map
+})
+
 function statusClass(state) {
   return `status-pill status-${state || 'off'}`
 }
@@ -319,6 +333,7 @@ onBeforeUnmount(() => {
                     <div class="pile-meta">
                       <span :class="statusClass(pile.powerState)">{{ powerLabel[pile.powerState] || pile.powerState }}</span>
                       <span :class="statusClass(pile.workingState)">{{ workingLabel[pile.workingState] || pile.workingState }}</span>
+                      <span v-if="dispatchedByPile[pile.id]" class="status-pill status-running">已分配 {{ dispatchedByPile[pile.id] }} 辆待充</span>
                       <span class="status-pill status-idle">{{ pile.totalChargeNum }} 次</span>
                       <span class="status-pill status-dispatched">{{ fmtNumber(pile.totalCapacity, 2) }} kWh</span>
                       <span class="status-pill status-off">{{ fmtDuration(pile.totalChargeTime) }}</span>
