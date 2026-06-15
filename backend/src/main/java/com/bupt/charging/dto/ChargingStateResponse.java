@@ -16,6 +16,7 @@ public record ChargingStateResponse(
         String modeLabel,
         BigDecimal requestAmount,
         Integer pileId,
+        Integer priority,
         LocalDateTime requestTime,
         boolean canStart
 ) {
@@ -32,6 +33,7 @@ public record ChargingStateResponse(
                 request.getRequestMode().getLabel(),
                 request.getRequestAmount(),
                 request.getPileId(),
+                request.getPriority(),
                 request.getRequestTime(),
                 request.isDispatched()
         );
