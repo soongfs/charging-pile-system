@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 
 public record ChargingStateResponse(
         Long requestId,
+        String carId,
         int carPosition,
         int carNumberBeforePosition,
         String carState,
@@ -22,6 +23,7 @@ public record ChargingStateResponse(
         int queueNumber = request.getQueueNum() == null ? 0 : request.getQueueNum();
         return new ChargingStateResponse(
                 request.getId(),
+                request.getCarId(),
                 queueNumber,
                 carsAhead,
                 request.getCarState().getValue(),
