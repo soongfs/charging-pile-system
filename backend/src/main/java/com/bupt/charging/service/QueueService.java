@@ -12,7 +12,6 @@ import com.bupt.charging.mapper.ChargingRequestMapper;
 import com.bupt.charging.service.scheduling.SchedulingStrategy;
 import com.bupt.charging.time.TimeProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -26,20 +25,20 @@ public class QueueService {
     private final ChargingRecordMapper recordMapper;
     private final SchedulingStrategy schedulingStrategy;
     private final TimeProvider timeProvider;
-    private final SchedulingMode schedulingMode;
+    private final SchedulingModeHolder schedulingModeHolder;
 
     public QueueService(ChargingRequestMapper requestMapper,
                         ChargingPileMapper pileMapper,
                         ChargingRecordMapper recordMapper,
                         @Qualifier("timeOrderSchedulingStrategy") SchedulingStrategy schedulingStrategy,
                         TimeProvider timeProvider,
-                        @Value("${charging.scheduling.mode:BASIC}") SchedulingMode schedulingMode) {
+                        SchedulingModeHolder schedulingModeHolder) {
         this.requestMapper = requestMapper;
         this.pileMapper = pileMapper;
         this.recordMapper = recordMapper;
         this.schedulingStrategy = schedulingStrategy;
         this.timeProvider = timeProvider;
-        this.schedulingMode = schedulingMode;
+        this.schedulingModeHolder = schedulingModeHolder;
     }
 
     /**
@@ -105,7 +104,7 @@ public class QueueService {
     public ChargingRequest dispatchNext(ChargingMode mode) {
         // 8b 批量调度模式：不自动逐辆派车，车辆滞留等候区，由 BatchSchedulingService
         // 在满站(或演示触发)时统一做整批最优指派。此处直接返回，避免提前分配破坏批量语义。
-        if (schedulingMode == SchedulingMode.BATCH_SHORTEST) {
+        if (schedulingModeHolder.getMode() == SchedulingMode.BATCH_SHORTEST) {
             return null;
         }
         ChargingRequest lastDispatched = null;
@@ -129,7 +128,7 @@ public class QueueService {
 
             // 选车：BASIC 走 FCFS(timeOrder 策略)；8a SINGLE_SHORTEST 走最短作业优先(SPT)。
             // 故障优先分组(group)逻辑对两种模式都生效——扩展模式仅改变同优先级内的选车顺序。
-            ChargingRequest next = (schedulingMode == SchedulingMode.SINGLE_SHORTEST)
+            ChargingRequest next = (schedulingModeHolder.getMode() == SchedulingMode.SINGLE_SHORTEST)
                     ? selectShortestJob(group, mode)
                     : schedulingStrategy.selectNextCar(group);
             if (next == null) return lastDispatched;

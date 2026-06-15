@@ -24,6 +24,9 @@ import {
   queryQueueState,
   setParameters,
   startChargingPile,
+  getSchedulingMode,
+  setSchedulingMode,
+  triggerBatchDispatch,
 } from '../api'
 
 const router = useRouter()
@@ -50,6 +53,31 @@ const navItems = [
   { key: 'piles', label: '充电桩状态', icon: Gauge },
   { key: 'queues', label: '等待队列', icon: List },
   { key: 'pricing', label: '计费参数', icon: Settings },
+  { key: 'scheduling', label: '调度策略', icon: Activity },
+]
+
+// 调度模式：BASIC 基础(默认必做) / SINGLE_SHORTEST 8a / BATCH_SHORTEST 8b(可选加分)
+const schedulingMode = ref('BASIC')
+const schedulingBusy = ref(false)
+const schedulingOptions = [
+  {
+    value: 'BASIC',
+    title: '基础调度（默认）',
+    badge: '必做',
+    desc: '先来先到(FCFS)选车，按「单辆车完成充电所需时间最短」选桩。验收用例采用此模式。',
+  },
+  {
+    value: 'SINGLE_SHORTEST',
+    title: '单次调度总时长最短 · 8a',
+    badge: '加分',
+    desc: '充电区出现空位时，按「最短作业优先(SPT)」选车——自身充电时长(电量/功率)最小者优先进入，使这组车累计完成时长最短。仍区分快充/慢充。',
+  },
+  {
+    value: 'BATCH_SHORTEST',
+    title: '批量调度总时长最短 · 8b',
+    badge: '加分',
+    desc: '满站时触发批量调度，不区分快充/慢充、不区分到达先后，任意车可分配任意类型桩；用贪心代价矩阵做车-桩最优指派，使整批总完成时长最短。该模式下需手动触发批量调度。',
+  },
 ]
 
 const workingLabel = {
@@ -143,6 +171,48 @@ async function savePricing() {
   }
 }
 
+async function loadSchedulingMode(silent = true) {
+  try {
+    const data = await getSchedulingMode()
+    if (data?.mode) schedulingMode.value = data.mode
+  } catch (error) {
+    if (!silent) message.error(error.message)
+  }
+}
+
+async function changeSchedulingMode(mode) {
+  if (mode === schedulingMode.value) return
+  schedulingBusy.value = true
+  try {
+    const data = await setSchedulingMode(mode)
+    schedulingMode.value = data?.mode || mode
+    message.success(`已切换调度模式：${schedulingMode.value}`)
+    await Promise.all([loadPiles(true), loadQueues(true)])
+  } catch (error) {
+    message.error(error.message)
+    await loadSchedulingMode()
+  } finally {
+    schedulingBusy.value = false
+  }
+}
+
+async function runBatchDispatch() {
+  schedulingBusy.value = true
+  try {
+    const res = await triggerBatchDispatch(true)
+    if (res?.success) {
+      message.success(res.message || '批量调度完成')
+    } else {
+      message.warning(res?.message || '批量调度未触发')
+    }
+    await Promise.all([loadPiles(true), loadQueues(true)])
+  } catch (error) {
+    message.error(error.message)
+  } finally {
+    schedulingBusy.value = false
+  }
+}
+
 function queueRows(rows, modeLabel) {
   return rows.map((row, index) => ({
     idx: index + 1,
@@ -156,7 +226,7 @@ function queueRows(rows, modeLabel) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadPiles(true), loadQueues(true)])
+  await Promise.all([loadPiles(true), loadQueues(true), loadSchedulingMode()])
   timer = window.setInterval(() => {
     loadPiles(true)
     loadQueues(true)
@@ -381,6 +451,54 @@ onBeforeUnmount(() => {
                     <span class="info-value">22:00-08:00</span>
                   </div>
                 </div>
+              </div>
+            </div>
+          </section>
+
+          <section v-if="activeTab === 'scheduling'" class="tool-panel">
+            <div class="tool-header">
+              <h2 class="tool-title"><Activity :size="18" /> 调度策略</h2>
+              <span class="status-pill status-dispatched">当前：{{ schedulingMode }}</span>
+            </div>
+            <div class="tool-body">
+              <p class="sched-hint">
+                调度策略决定「叫号选车」与「分配充电桩」的规则。基础调度为必做项，
+                验收用例采用此模式；8a / 8b 为详细需求第 8 条「可选加分」扩展调度，
+                按需求不考虑改请求与故障，仅用于加分演示。切换后立即对后续调度生效。
+              </p>
+              <div class="sched-options">
+                <label
+                  v-for="opt in schedulingOptions"
+                  :key="opt.value"
+                  class="sched-card"
+                  :class="{ active: schedulingMode === opt.value }"
+                >
+                  <div class="sched-card-head">
+                    <input
+                      type="radio"
+                      name="sched-mode"
+                      :value="opt.value"
+                      :checked="schedulingMode === opt.value"
+                      :disabled="schedulingBusy"
+                      @change="changeSchedulingMode(opt.value)"
+                    />
+                    <span class="sched-card-title">{{ opt.title }}</span>
+                    <span
+                      class="status-pill"
+                      :class="opt.badge === '必做' ? 'status-idle' : 'status-dispatched'"
+                    >{{ opt.badge }}</span>
+                  </div>
+                  <p class="sched-card-desc">{{ opt.desc }}</p>
+                </label>
+              </div>
+              <div v-if="schedulingMode === 'BATCH_SHORTEST'" class="sched-batch">
+                <p class="sched-hint">
+                  批量调度模式下，新提交的车辆会滞留等候区，不自动逐辆派车，需手动触发一次批量调度。
+                </p>
+                <n-button type="primary" :loading="schedulingBusy" @click="runBatchDispatch">
+                  <template #icon><Play :size="16" /></template>
+                  触发批量调度
+                </n-button>
               </div>
             </div>
           </section>

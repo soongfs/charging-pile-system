@@ -8,6 +8,8 @@ import com.bupt.charging.service.BatchSchedulingService;
 import com.bupt.charging.service.ChargingService;
 import com.bupt.charging.service.PileService;
 import com.bupt.charging.service.PricingService;
+import com.bupt.charging.service.SchedulingModeHolder;
+import com.bupt.charging.enums.SchedulingMode;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -20,17 +22,20 @@ public class AdminController {
     private final AdminMonitorService monitorService;
     private final ChargingService chargingService;
     private final BatchSchedulingService batchSchedulingService;
+    private final SchedulingModeHolder schedulingModeHolder;
 
     public AdminController(PileService pileService,
                            PricingService pricingService,
                            AdminMonitorService monitorService,
                            ChargingService chargingService,
-                           BatchSchedulingService batchSchedulingService) {
+                           BatchSchedulingService batchSchedulingService,
+                           SchedulingModeHolder schedulingModeHolder) {
         this.pileService = pileService;
         this.pricingService = pricingService;
         this.monitorService = monitorService;
         this.chargingService = chargingService;
         this.batchSchedulingService = batchSchedulingService;
+        this.schedulingModeHolder = schedulingModeHolder;
     }
 
     @PostMapping("/pile/power-on")
@@ -92,5 +97,33 @@ public class AdminController {
         body.put("message", result.message());
         body.put("assignments", result.assignments());
         return body;
+    }
+
+    /** 查询当前调度模式（BASIC / SINGLE_SHORTEST / BATCH_SHORTEST）。 */
+    @GetMapping("/scheduling/mode")
+    public Map<String, Object> getSchedulingMode() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("mode", schedulingModeHolder.getMode().name());
+        return ApiResponse.success(data);
+    }
+
+    /**
+     * 运行期切换调度模式（管理员）。BASIC=基础(默认必做)，
+     * SINGLE_SHORTEST=8a 单次调度，BATCH_SHORTEST=8b 批量调度（可选加分）。
+     */
+    @PostMapping("/scheduling/mode")
+    public Map<String, Object> setSchedulingMode(@RequestBody Map<String, String> body) {
+        String raw = body == null ? null : body.get("mode");
+        if (raw == null || raw.isBlank()) {
+            return ApiResponse.fromResult(1, "缺少 mode 参数");
+        }
+        try {
+            schedulingModeHolder.setMode(SchedulingMode.valueOf(raw.trim().toUpperCase()));
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.fromResult(1, "未知调度模式: " + raw);
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("mode", schedulingModeHolder.getMode().name());
+        return ApiResponse.success(data);
     }
 }

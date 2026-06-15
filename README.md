@@ -300,7 +300,19 @@ npm run build
 
 ### 启用扩展模式
 
-默认 `application.properties` 中为 `BASIC`。临时启用扩展模式（不改配置文件）：
+默认 `application.properties` 中为 `BASIC`。有两种启用扩展模式的方式：
+
+**方式一 · 前端运行期切换（推荐演示用）**
+
+管理员工作台左侧导航「调度策略」面板，单选三种模式即可运行期切换，
+页面内含每种模式的算法说明文字。选中 `BATCH_SHORTEST` 后会出现「触发批量调度」
+按钮（批量模式下车辆滞留等候区，需手动触发一次整批指派）。切换立即对后续调度生效，
+底层通过单例 `SchedulingModeHolder` 保证 QueueService 与 BatchSchedulingService 状态一致。
+
+对应接口：`GET /api/admin/scheduling/mode`（查询）、`POST /api/admin/scheduling/mode`
+（body `{"mode":"..."}` 切换）、`POST /api/admin/batch-dispatch?force=true`（触发批量调度）。
+
+**方式二 · 启动参数（不改配置文件，固定初始模式）**
 
 ```bash
 cd backend

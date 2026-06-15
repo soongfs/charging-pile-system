@@ -8,7 +8,6 @@ import com.bupt.charging.enums.RequestState;
 import com.bupt.charging.enums.SchedulingMode;
 import com.bupt.charging.mapper.ChargingPileMapper;
 import com.bupt.charging.mapper.ChargingRequestMapper;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,16 +32,16 @@ public class BatchSchedulingService {
     private final ChargingRequestMapper requestMapper;
     private final ChargingPileMapper pileMapper;
     private final ChargingService chargingService;
-    private final SchedulingMode schedulingMode;
+    private final SchedulingModeHolder schedulingModeHolder;
 
     public BatchSchedulingService(ChargingRequestMapper requestMapper,
                                   ChargingPileMapper pileMapper,
                                   ChargingService chargingService,
-                                  @Value("${charging.scheduling.mode:BASIC}") SchedulingMode schedulingMode) {
+                                  SchedulingModeHolder schedulingModeHolder) {
         this.requestMapper = requestMapper;
         this.pileMapper = pileMapper;
         this.chargingService = chargingService;
-        this.schedulingMode = schedulingMode;
+        this.schedulingModeHolder = schedulingModeHolder;
     }
 
     /** 批量调度结果。 */
@@ -59,7 +58,7 @@ public class BatchSchedulingService {
      */
     @Transactional
     public BatchResult dispatchBatch(boolean force) {
-        if (schedulingMode != SchedulingMode.BATCH_SHORTEST) {
+        if (schedulingModeHolder.getMode() != SchedulingMode.BATCH_SHORTEST) {
             return new BatchResult(1, "当前调度模式非 BATCH_SHORTEST，批量调度未启用", List.of());
         }
 

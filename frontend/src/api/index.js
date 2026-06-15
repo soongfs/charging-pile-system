@@ -43,6 +43,10 @@ export const startChargingPile = (data) => unwrap(http.post('/api/admin/pile/sta
 export const powerOff = (data) => unwrap(http.post('/api/admin/pile/power-off', data))
 export const queryPileState = (pileId) => unwrap(http.get('/api/admin/pile/state', { params: { pileId } }))
 export const queryQueueState = (type) => unwrap(http.get('/api/admin/queue/state', { params: { type } }))
+export const getSchedulingMode = () => unwrap(http.get('/api/admin/scheduling/mode'))
+export const setSchedulingMode = (mode) => unwrap(http.post('/api/admin/scheduling/mode', { mode }))
+export const triggerBatchDispatch = (force = true) =>
+  http.post('/api/admin/batch-dispatch', null, { params: { force } }).then((r) => r.data)
 
 export default {
   login,
@@ -63,4 +67,7 @@ export default {
   powerOff,
   queryPileState,
   queryQueueState,
+  getSchedulingMode,
+  setSchedulingMode,
+  triggerBatchDispatch,
 }

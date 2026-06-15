@@ -719,3 +719,59 @@ textarea {
     display: none;
   }
 }
+
+/* 调度策略面板 */
+.sched-hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted, #8a8a80);
+}
+
+.sched-options {
+  display: grid;
+  gap: 12px;
+}
+
+.sched-card {
+  display: block;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.sched-card:hover {
+  border-color: var(--accent, #7a8b6f);
+}
+
+.sched-card.active {
+  border-color: var(--accent, #7a8b6f);
+  background: var(--surface-hover, rgba(122, 139, 111, 0.08));
+}
+
+.sched-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sched-card-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.sched-card-desc {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-muted, #8a8a80);
+}
+
+.sched-batch {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+}
+
