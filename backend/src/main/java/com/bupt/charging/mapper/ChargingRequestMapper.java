@@ -30,7 +30,8 @@ public interface ChargingRequestMapper {
             "update_time = strftime('%Y-%m-%dT%H:%M:%f','now'), version = COALESCE(version, 0) + 1 WHERE id = #{id}")
     int update(ChargingRequest request);
 
-    @Select("SELECT * FROM charging_request WHERE request_mode = #{mode} AND car_state IN ('waiting', 'dispatched') ORDER BY priority DESC, request_time ASC")
+    @Select("SELECT * FROM charging_request WHERE request_mode = #{mode} AND car_state IN ('waiting', 'dispatched', 'charging') " +
+            "ORDER BY CASE car_state WHEN 'charging' THEN 0 WHEN 'dispatched' THEN 1 ELSE 2 END, priority DESC, request_time ASC")
     List<ChargingRequest> findByQueueType(@Param("mode") ChargingMode mode);
 
     @Select("SELECT * FROM charging_request WHERE car_state = 'waiting' AND request_mode = #{mode} ORDER BY priority DESC, request_time ASC")
