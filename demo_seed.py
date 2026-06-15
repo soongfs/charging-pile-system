@@ -6,17 +6,17 @@
 
 特点：
   - 不依赖 sim 时钟，真实墙钟(默认 profile)与 sim profile 都能用。
-  - 默认请求电量 1 度，配合 --auto-start 可快速充满演示「充电中」状态。
-  - --auto-start：铺完后自动让已分配桩位的车进入充电中。
+  - 默认请求电量 30 度，配合 --auto-start 可稳定停留「充电中」状态供演示。
+  - --auto-start：多轮让每个桩的车头进入充电中(确保桩不被 dispatched 车空占)。
   - --reset：开跑前清空本脚本车号(F../S..)的残留请求，便于反复演示。
   - 参数化快充/慢充车数量与电量。
 
 用法：
-  python3 demo_seed.py                          # 默认快充5 + 慢充5，每辆1度
-  python3 demo_seed.py --auto-start             # 铺完自动开始充电(看到充电中)
+  python3 demo_seed.py                          # 默认快充5 + 慢充5，每辆30度
+  python3 demo_seed.py --auto-start             # 铺完自动开始充电(每桩车头进入充电中)
   python3 demo_seed.py --reset --auto-start     # 先清场再铺，最适合反复演示
   python3 demo_seed.py --fast 10 --slow 10      # 铺到溢出，演示等候区排队
-  python3 demo_seed.py --amount 2               # 每辆请求2度
+  python3 demo_seed.py --amount 5               # 每辆请求5度(充得快，状态变化快)
   python3 demo_seed.py --status-only            # 只看当前快照，不铺新车
   python3 demo_seed.py --reset-only             # 只清场，不铺新车
 
@@ -108,16 +108,45 @@ def car_ids(fast_n, slow_n):
            [f"S{i:02d}" for i in range(1, slow_n + 1)]
 
 
-def auto_start(cars):
-    """让所有已分配桩位(dispatched)的车进入充电中(charging)。"""
-    started = 0
-    for cid in cars:
-        d = car_state(cid)
-        if str(d.get("carState")).lower() == "dispatched" and d.get("pileId"):
-            if start(cid, d.get("pileId")).get("code") == 0:
+def auto_start(cars, max_rounds=6):
+    """多轮让每个桩的车头进入充电中(charging)，确保桩不被 dispatched 车空占。
+
+    系统规则：一个桩同时只有一辆车在充电(车头)，桩内其余 dispatched 车排队等车头充完。
+    单轮 start 只能点亮当时的车头；若桩内车头充完离桩、下一辆补为新车头(仍是 dispatched)，
+    需再次 start。故多轮：每轮给「有 dispatched 车头但当前无 charging」的桩 start 车头，
+    轮间等待让状态落地，直到无新车可 start。
+    """
+    total_started = 0
+    for rnd in range(max_rounds):
+        # 统计每个桩当前是否已有车在充电、各桩的 dispatched 车头(最早 requestTime)。
+        charging_piles = set()
+        head_by_pile = {}  # pileId -> (requestTime, carId)
+        for cid in cars:
+            d = car_state(cid)
+            st = str(d.get("carState")).lower()
+            pid = d.get("pileId")
+            if not pid:
+                continue
+            if st == "charging":
+                charging_piles.add(pid)
+            elif st == "dispatched":
+                rt = d.get("requestTime") or ""
+                if pid not in head_by_pile or rt < head_by_pile[pid][0]:
+                    head_by_pile[pid] = (rt, cid)
+
+        started = 0
+        for pid, (_, cid) in head_by_pile.items():
+            if pid in charging_piles:
+                continue  # 该桩已有车在充电，车头排队等待，不强启
+            if start(cid, pid).get("code") == 0:
                 started += 1
-    print(f"[充电] 已让 {started} 辆车开始充电(dispatched -> charging)。")
-    return started
+        total_started += started
+        if started == 0:
+            break
+        time.sleep(WAIT * 3)  # 等刚 start 的车状态落地，等候区可能补位
+
+    print(f"[充电] 已让 {total_started} 辆车开始充电(每桩车头 dispatched -> charging)。")
+    return total_started
 
 
 def reset(cars, max_rounds=8):
@@ -214,7 +243,8 @@ def main():
     ap = argparse.ArgumentParser(description="验收演示：批量注册车辆并加入排队")
     ap.add_argument("--fast", type=int, default=5, help="快充车数量(默认5)")
     ap.add_argument("--slow", type=int, default=5, help="慢充车数量(默认5)")
-    ap.add_argument("--amount", type=float, default=1.0, help="每辆请求电量度(默认1，快速演示)")
+    ap.add_argument("--amount", type=float, default=30.0,
+                    help="每辆请求电量度(默认30，约快充1h/慢充3h，充电中状态可稳定停留演示)")
     ap.add_argument("--capacity", type=float, default=100, help="电池总容量度(默认100)")
     ap.add_argument("--base", default="http://localhost:8080", help="后端地址")
     ap.add_argument("--auto-start", action="store_true", help="铺完自动开始充电(看到充电中)")
