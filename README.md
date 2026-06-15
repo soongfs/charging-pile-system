@@ -266,3 +266,74 @@ npm run build
 
 相关测试：`FaultPriorityDispatchTest`（优先级与等候区冻结）、
 `FaultSchedulingTest`（置 FAULT、车头结算、剩余迁桩续充）。
+
+## 11. 调度策略（含可选加分扩展调度）
+
+系统通过配置项 `charging.scheduling.mode` 切换调度模式，**默认 `BASIC`**，
+扩展模式为详细需求第 8 条「可选加分」项，按需求 8c 不考虑改请求与故障，
+仅用于加分演示，**不影响默认验收行为**。
+
+| 模式 | 配置值 | 对应需求 | 选车规则 | 选桩规则 |
+| --- | --- | --- | --- | --- |
+| 基础调度（默认） | `BASIC` | 第 3 条（必做） | FCFS：等候区同模式最早到达者 | 单车「完成充电所需时间最短」 |
+| 单次调度 8a | `SINGLE_SHORTEST` | 8a（加分） | SPT：自身充电时长最短（电量最小）者 | 同上，尊重快慢充类型 |
+| 批量调度 8b | `BATCH_SHORTEST` | 8b（加分） | 整批一起算（见下） | 贪心代价矩阵，跨类型最优指派 |
+
+### 8a 单次调度总时长最短（SINGLE_SHORTEST）
+
+充电区出现空位触发调度时，在同模式等候车中按 **最短作业优先（SPT）** 选车
+（自身充电时长 = 请求电量 / 充电功率，取最小），而非按到达先后。SPT 在并行多机
+调度下使「所有作业累计完成时长（总等待 + 总充电）」最小，即 8a 的优化目标。
+实现位于 `QueueService.selectShortestJob`，嵌入既有 `dispatchNext` 选车环节，
+仍遵守快充/慢充类型约束，对充电主流程其余逻辑无侵入。
+
+### 8b 批量调度总时长最短（BATCH_SHORTEST）
+
+仅当到站车辆 = 全部车位数（充电区 + 等候区）时触发一次批量调度（演示可用
+`force=true` 跳过满站校验）。一次批量调度 **不区分快充/慢充、不区分到达先后**，
+任意车可分配任意类型桩；构造代价矩阵 `Matrix[i][j] = 车 i 在桩 j 的完成时长`，
+贪心迭代选取代价最小的（车,桩）对进行一对一指派，使整批总完成时长最短。
+实现位于独立的 `BatchSchedulingService` + 管理员端点 `POST /api/admin/batch-dispatch`，
+通过 `ChargingService.forceAssignAndStart` 跨类型启动充电（绕过模式==类型校验）。
+该模式下 `dispatchNext` 不自动逐辆派车，车辆滞留等候区等待批量统一指派，
+因此与用户充电主路径（类型校验、逐辆调度）完全隔离，符合 8c 隔离语义。
+
+### 启用扩展模式
+
+默认 `application.properties` 中为 `BASIC`。临时启用扩展模式（不改配置文件）：
+
+```bash
+cd backend
+# 8a 单次调度
+mvn -DskipTests spring-boot:run -Dspring-boot.run.profiles=sim \
+    -Dspring-boot.run.arguments=--charging.scheduling.mode=SINGLE_SHORTEST
+# 8b 批量调度
+mvn -DskipTests spring-boot:run -Dspring-boot.run.profiles=sim \
+    -Dspring-boot.run.arguments=--charging.scheduling.mode=BATCH_SHORTEST
+```
+
+### 测试与一键演示
+
+单元测试（与基础调度共 6 项，全绿）：
+
+```bash
+cd backend && mvn test
+```
+
+- `SingleShortestSchedulingTest` —— 8a：SPT 让小电量车先于早到的大电量车进充电区
+- `BatchShortestSchedulingTest` —— 8b：批量调度跨类型把慢充车分到快充桩
+
+黑盒一键演示脚本 `extended_scheduling_demo.py`（免前端逐个点击，自动注册车辆、
+提交请求、触发调度、打印每步系统状态并导出 CSV）。需后端以对应模式 + sim profile 运行：
+
+```bash
+# 演示 8a（后端需以 SINGLE_SHORTEST + sim profile 启动）
+python3 extended_scheduling_demo.py --mode 8a --out demo_8a.csv
+# 演示 8b（后端需以 BATCH_SHORTEST + sim profile 启动）
+python3 extended_scheduling_demo.py --mode 8b --out demo_8b.csv
+```
+
+演示脚本会清晰对照：同一场景下 8a 选电量最小车（基础模式则选最早到达车）、
+8b 把多辆混合模式车跨类型最优指派到 5 个桩。退出码 0 = 演示完成，
+2 = 后端不可用 / 非 sim profile / 模式不匹配。
+

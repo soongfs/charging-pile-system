@@ -5,12 +5,14 @@ import com.bupt.charging.entity.ChargingRecord;
 import com.bupt.charging.entity.ChargingRequest;
 import com.bupt.charging.enums.ChargingMode;
 import com.bupt.charging.enums.RequestState;
+import com.bupt.charging.enums.SchedulingMode;
 import com.bupt.charging.mapper.ChargingPileMapper;
 import com.bupt.charging.mapper.ChargingRecordMapper;
 import com.bupt.charging.mapper.ChargingRequestMapper;
 import com.bupt.charging.service.scheduling.SchedulingStrategy;
 import com.bupt.charging.time.TimeProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -24,17 +26,20 @@ public class QueueService {
     private final ChargingRecordMapper recordMapper;
     private final SchedulingStrategy schedulingStrategy;
     private final TimeProvider timeProvider;
+    private final SchedulingMode schedulingMode;
 
     public QueueService(ChargingRequestMapper requestMapper,
                         ChargingPileMapper pileMapper,
                         ChargingRecordMapper recordMapper,
                         @Qualifier("timeOrderSchedulingStrategy") SchedulingStrategy schedulingStrategy,
-                        TimeProvider timeProvider) {
+                        TimeProvider timeProvider,
+                        @Value("${charging.scheduling.mode:BASIC}") SchedulingMode schedulingMode) {
         this.requestMapper = requestMapper;
         this.pileMapper = pileMapper;
         this.recordMapper = recordMapper;
         this.schedulingStrategy = schedulingStrategy;
         this.timeProvider = timeProvider;
+        this.schedulingMode = schedulingMode;
     }
 
     /**
@@ -98,6 +103,11 @@ public class QueueService {
      * @return 本次最后一辆成功进入桩内队列的车；无调度发生返回 null
      */
     public ChargingRequest dispatchNext(ChargingMode mode) {
+        // 8b 批量调度模式：不自动逐辆派车，车辆滞留等候区，由 BatchSchedulingService
+        // 在满站(或演示触发)时统一做整批最优指派。此处直接返回，避免提前分配破坏批量语义。
+        if (schedulingMode == SchedulingMode.BATCH_SHORTEST) {
+            return null;
+        }
         ChargingRequest lastDispatched = null;
         while (true) {
             List<ChargingPile> candidates = candidatePiles(mode);
@@ -117,7 +127,11 @@ public class QueueService {
                 if (p == topPriority) group.add(r);
             }
 
-            ChargingRequest next = schedulingStrategy.selectNextCar(group);
+            // 选车：BASIC 走 FCFS(timeOrder 策略)；8a SINGLE_SHORTEST 走最短作业优先(SPT)。
+            // 故障优先分组(group)逻辑对两种模式都生效——扩展模式仅改变同优先级内的选车顺序。
+            ChargingRequest next = (schedulingMode == SchedulingMode.SINGLE_SHORTEST)
+                    ? selectShortestJob(group, mode)
+                    : schedulingStrategy.selectNextCar(group);
             if (next == null) return lastDispatched;
 
             ChargingPile bestPile = selectPileByFinishTime(next, candidates);
@@ -146,6 +160,24 @@ public class QueueService {
             }
         }
         return result;
+    }
+
+    /**
+     * 8a 单次调度选车：最短作业优先(SPT)。在同优先级候选车中，选「自身充电时长最短」
+     * 的车(自身充电时长 = 请求电量 / 该模式充电功率)。功率对同模式车为常量，故等价于
+     * 按请求电量升序；电量相同时按到达先后(requestTime)打破并列，保证确定性。
+     *
+     * <p>理论依据：单位时间多机并行调度下，SPT 使「所有作业总完成时间(累计等待+累计充电)」
+     * 最小，正是详细需求 8a 的优化目标。</p>
+     */
+    private ChargingRequest selectShortestJob(List<ChargingRequest> group, ChargingMode mode) {
+        if (group == null || group.isEmpty()) return null;
+        return group.stream()
+                .min(Comparator
+                        .comparing((ChargingRequest r) -> r.getRequestAmount().doubleValue())
+                        .thenComparing(ChargingRequest::getRequestTime)
+                        .thenComparing(ChargingRequest::getId))
+                .orElse(null);
     }
 
     /**

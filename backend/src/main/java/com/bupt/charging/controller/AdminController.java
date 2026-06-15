@@ -4,6 +4,7 @@ import com.bupt.charging.entity.ChargingPile;
 import com.bupt.charging.dto.PileCommandRequest;
 import com.bupt.charging.dto.PricingUpdateRequest;
 import com.bupt.charging.service.AdminMonitorService;
+import com.bupt.charging.service.BatchSchedulingService;
 import com.bupt.charging.service.ChargingService;
 import com.bupt.charging.service.PileService;
 import com.bupt.charging.service.PricingService;
@@ -18,15 +19,18 @@ public class AdminController {
     private final PricingService pricingService;
     private final AdminMonitorService monitorService;
     private final ChargingService chargingService;
+    private final BatchSchedulingService batchSchedulingService;
 
     public AdminController(PileService pileService,
                            PricingService pricingService,
                            AdminMonitorService monitorService,
-                           ChargingService chargingService) {
+                           ChargingService chargingService,
+                           BatchSchedulingService batchSchedulingService) {
         this.pileService = pileService;
         this.pricingService = pricingService;
         this.monitorService = monitorService;
         this.chargingService = chargingService;
+        this.batchSchedulingService = batchSchedulingService;
     }
 
     @PostMapping("/pile/power-on")
@@ -74,5 +78,19 @@ public class AdminController {
     @GetMapping("/queue/state")
     public Map<String, Object> queryQueueState(@RequestParam(defaultValue = "fast") String type) {
         return ApiResponse.success(monitorService.queryQueueState(type));
+    }
+
+    /**
+     * 8b 批量调度演示端点（可选加分）。仅在 charging.scheduling.mode=BATCH_SHORTEST 时生效。
+     * force=true 跳过「满站」前置校验便于演示。
+     */
+    @PostMapping("/batch-dispatch")
+    public Map<String, Object> batchDispatch(@RequestParam(defaultValue = "false") boolean force) {
+        BatchSchedulingService.BatchResult result = batchSchedulingService.dispatchBatch(force);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("success", result.code() == 0);
+        body.put("message", result.message());
+        body.put("assignments", result.assignments());
+        return body;
     }
 }

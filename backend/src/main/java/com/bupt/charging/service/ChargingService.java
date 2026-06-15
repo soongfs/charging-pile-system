@@ -196,6 +196,42 @@ public class ChargingService {
     }
 
     /**
+     * 8b 批量调度专用：将等候车强制分配到指定桩并直接启动充电，<b>不校验请求模式与桩类型一致</b>。
+     *
+     * <p>仅由 {@link BatchSchedulingService} 在 BATCH_SHORTEST 模式下调用，实现详细需求 8b
+     * 「任意车可分配任意类型充电桩」。普通用户充电主路径仍走 {@link #startCharging} 的类型校验，
+     * 不受影响。要求车辆处于 waiting/dispatched、桩开机未故障且当前无车在充。</p>
+     *
+     * @return 0 成功；1 前置条件不满足
+     */
+    @Transactional
+    public int forceAssignAndStart(Long requestId, Integer pileId) {
+        if (requestId == null || pileId == null) return 1;
+        ChargingRequest request = requestMapper.findById(requestId);
+        if (request == null) return 1;
+        if (request.getCarState() != RequestState.WAITING && request.getCarState() != RequestState.DISPATCHED) return 1;
+        if (recordMapper.findActiveByPileId(pileId) != null) return 1;
+        if (recordMapper.findActiveByCarId(request.getCarId()) != null) return 1;
+
+        // 置 dispatched（若已 dispatched 则保持），再转 charging。
+        if (request.getCarState() == RequestState.WAITING) {
+            stateMachine.applyRequestState(request, RequestState.DISPATCHED);
+        }
+        request.setPileId(pileId);
+
+        ChargingRecord record = new ChargingRecord(request.getCarId(), request.getId(), pileId);
+        record.setStartTime(timeProvider.now());
+        recordMapper.insert(record);
+
+        pileService.updateWorkingState(pileId, PileWorkingState.CHARGING);
+        stateMachine.applyRequestState(request, RequestState.CHARGING);
+        request.setQueueNum(0);
+        request.setUpdateTime(timeProvider.now());
+        requestMapper.update(request);
+        return 0;
+    }
+
+    /**
      * UC2: Query_Charging_State — Query real-time charging progress.
      */
     public ChargingProgressResponse queryChargingState(String carId) {
