@@ -99,22 +99,40 @@ def end(cid):
     return post("/api/charging/end", {"carId": cid, "pileId": None})
 
 
-def reset(cars):
-    """清空残留车辆(多轮 end/start)，便于反复演示。"""
-    for _ in range(8):
-        active = 0
-        for cid in cars:
+def all_active_cars():
+    """用 queue/state 发现当前所有活跃车(waiting/dispatched/charging)，含其他脚本留下的。"""
+    ids = set()
+    for t in ("fast", "slow"):
+        for r in get(f"/api/admin/queue/state?type={t}").get("data") or []:
+            cid = r.get("carId")
+            if cid:
+                ids.add(cid)
+    return ids
+
+
+def clear_all_active(max_rounds=10):
+    """清空系统里所有活跃车(不管是谁注册的)，从干净状态开始演示。
+
+    queue/state 含 charging+dispatched+waiting。多轮：充电中 end，dispatched 先 start
+    再下一轮 end，等候区车待桩位释放后被调度上来再处理。直到无活跃车。
+    """
+    print("[清场] 清空系统现有全部活跃车辆(含其他演示残留)...")
+    for rnd in range(max_rounds):
+        ids = all_active_cars()
+        if not ids:
+            print(f"[清场] 完成(第 {rnd} 轮已无活跃车)。")
+            return
+        for cid in ids:
             d = car_state(cid)
             st = str(d.get("carState")).lower()
             if st == "charging":
-                end(cid); active += 1
+                end(cid)
             elif st == "dispatched" and d.get("pileId"):
-                start(cid, d.get("pileId")); active += 1
-            elif st == "waiting":
-                active += 1
-        if active == 0:
-            return
+                start(cid, d.get("pileId"))
         time.sleep(WAIT)
+    leftover = all_active_cars()
+    if leftover:
+        print(f"[清场] 仍有残留 {leftover}，建议重启后端删 charging-pile.db 彻底清库。")
 
 
 def pile_states():
@@ -154,16 +172,19 @@ def demo(fault_pile, do_recover):
     print(f"\n[场景] 演示 {PILE_LABEL[fault_pile]} 故障。仅用 {type_name} 桩 {same_type}，"
           f"各铺满 M=3，故障桩车头先充电。")
 
-    # 先把非同类型桩关机，避免干扰(只演示同类型迁移)。
-    other = [p for p in PILE_LABEL if p not in same_type]
-    for pid in same_type:
+    # 先全部开机，清空系统里所有活跃车(含其他脚本残留)，确保从干净状态演示。
+    for pid in PILE_LABEL:
         post("/api/admin/pile/power-on", {"pileId": pid})
+    time.sleep(WAIT)
+    clear_all_active()
+
+    # 再把非同类型桩关机，避免干扰(只演示同类型迁移)。
+    other = [p for p in PILE_LABEL if p not in same_type]
     for pid in other:
         post("/api/admin/pile/power-off", {"pileId": pid})
     time.sleep(WAIT)
 
     register_all(cars)
-    reset(cars)  # 清残留
 
     # 提交所有车(同类型)，系统自动分配到 same_type 各桩。
     for cid in cars:
